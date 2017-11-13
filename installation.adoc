@@ -1,0 +1,117 @@
+= Installation
+:sectnums:
+:source-language: clojure
+
+
+== Datomic Pro Starter 설치
+
+=== 계정 등록 
+
+* link:https://my.datomic.com/account[]에서 자신의 계정을 등록한다.
+
+* 참고: 위의 계정으로 설치한 datomic-pro의 expiry date: 2017/11/30
++
+이 기간이 지나면 새로운 계정으로 등록한 후, 다음의 과정을 다시 진행해야 한다. 그렇지
+않으면 아래의 transactor 실행시 에러가 나며 실행되지 않는다.
+
+
+=== datomic 다운로드
+
+Datomic 다운로드 방식에는 두 가지가 있다.
+
+. link:https://my.datomic.com/account[]에 로그인한 후, Datomic 최신 버전을 직접 다운로드 받는다.
+. 또는 로그인하지 않은 상태에서 아래와 같이 다운로드 받는다. (버전 번호는 다운받는 버전의 번호로 바꾸어 준다.)
++
+[listing]
+----
+$ wget --http-user=philos99.family@gmail.com \
+       --http-password=8c880dca-0e18-4fe9-9108-9b85df24ed79 \
+       https://my.datomic.com/repo/com/datomic/datomic-pro/0.9.5530/datomic-pro-0.9.5530.zip \
+       -O datomic-pro-0.9.5530.zip
+----
+
+
+
+=== Datomic 설치하기
+
+==== maven 설치
+
+[listing]
+----
+$ sudo apt install maven
+----
+
+==== Datomic 설치
+
+아래의 명령을 실행하면 ~/.m2/repository/com/datomic/datomic-pro 디렉토리에 datomic-pro
+peer 라이브러리가 설치된다.
+
+[source]
+....
+$ unzip datomic-pro-0.9.5530.zip
+$ cd datomic-pro-0.9.5530
+$ bin/maven-install
+....
+
+
+== Running the transactor with the dev storage protocol
+
+=== license-key 설정하기
+
+먼저 다음과 같이 파일을 복사한다.
+
+[listing]
+----
+$ cp config/samples/dev-transactor-templates.properties config/dev-transactor.properties
+----
+
+link:https://my.datomic.com/account[]에서 본인의 e-mail 주소로 송신한 것을
+`config/dev-transactor.properties` 파일에 다음과 같이 붙여 놓는다.
+
+[listing]
+.config/dev-transactor.properties
+----
+license-key=ddL1TkMUyi45BMzggkqZvt0WXAL9E6ziNYcKRG1IJp5B5vHTge\
+8GdpqKFeV9u5fIvF9A0PpawnNC9RCuaDylc2C1Y4oYCUJz14v8w8jSseLomMb2\
+2tjFgb79xywzAXw72f9O1dzaAvVHyyEaKwkVS1cuW2dse1AF5rRQLILVcqunb8\
+X5z3Dpt9GK88JBK4b+MxokYIbPsl3uB1FKkEPG0zk/BEbHgMju/XHnTYQa3+/T\
+tIqWF6H2/vIKWFSNM1Qn52jmkYfyJ7/6SQTKa4TEY3xGlj6vWHlHf2MVuOrfFX\
+Eh7KP9LQpjAtRBeGPAR/i1xXGKbsHB2rDJOOmxYVNu6Q==
+----
+
+
+=== transactor 실행하기
+
+[listing]
+----
+$ pwd
+datomic-pro-0.9.5530
+
+$ bin/transactor config/dev-transactor.properties
+launching with Java options -server -Xms1g -Xmx1g -XX:+UseG1GC -XX:MaxGCPauseMillis=50
+Starting datomic:dev://localhost:4334/<DB-NAME>, storing data in: data ...
+System started datomic:dev://localhost:4334/<DB-NAME>, storing data in: data
+----
+
+
+== project.clj :dependencies 지정하기
+
+[source]
+.project.clj
+----
+(defproject datomic-test "0.1.0-SNAPSHOT"
+  :dependencies [[com.datomic/datomic-pro "0.9.5530"]])
+----
+
+
+== Sample db `datomic-mbrainz-1968-1973-backup-2015-02-11.tar`를 datomic에 설치하기
+
+[listing]
+----
+$ wget http://s3.amazonaws.com/mbrainz/datomic-mbrainz-1968-1973-backup-2015-02-11.tar
+$ tar -xvf datomic-mbrainz-1968-1973-backup-2015-02-11.tar
+
+$ bin/datomic restore-db file:///path/to/backup/mbrainz-1968-1973 \
+              datomic:dev://localhost:4334/mbrainz-1968-1973
+----
+

@@ -1,0 +1,780 @@
+= Datomic: 함수형 데이터베이스
+:sectnums:
+:source-language: clojure
+:source-highlighter: coderay
+:coderay-css: class
+:imagesdir: img/
+:latexmath:
+
+== 강사 소개
+
+* 이름: 김영태
+* e-mail: philos99@gmail.com
+* link:http://www.kyobobook.co.kr/product/detailViewKor.laf?ejkGb=KOR&mallGb=KOR&barcode=9788966261802&orderClick=LAG&Kc=[클로저 시작하기] 공역, 인사이트 (원서: link:https://www.amazon.com/Living-Clojure-Introduction-Training-Developers/dp/1491909048/ref=sr_1_1?ie=UTF8&qid=1509447512&sr=8-1&keywords=living+clojure[Living Clojure], Carin Meier, O'Reilly)
+* link:https://github.com/philoskim/debux[debux] (Clojure/ClojureScript 디버깅 라이브러리) 제작
+** 예제: link:https://github.com/philoskim/debux#simple-example[]
+
+
+== Datomic 소개
+
+* Clojure 언어의 창시자 Rich Hickey가 만든 함수형 데이터베이스
+* Clojure 언어로 쓰여져 있다.
+* "Immutable" Database: 개념상 git과 유사
+* 2012년에 최초 버전(0.8.3335) 발표
+* 현재 최신 버전: 0.9.5561.62
+
+=== 참고: link:https://github.com/tonsky/datascript[DataScript]
+
+* Immutable memory database and Datalog query engine for Clojure, ClojureScript and JavaScript
+* 서버에서 사용되는 Datomic을 모방해 만들었다.
+* 주로 Web Browser Client용으로 사용된다.
+* Datomic과 거의 동일한 API를 제공한다.
+
+
+== Datomic 도입 사례
+
+* link:http://blog.cognitect.com/blog/2015/6/30/walmart-runs-clojure-at-scale[Walmart runs Clojure and Datomic at scale]
+* link:http://blog.datomic.com/2015/09/nubank-chooses-datomic.html[Nubank chooses Datomic]
+ 
+* link:http://www.datomic.com/customers.html[기타 Customers Story]
+
+
+== Datomic의 특징
+
+* Transactional store, Analytics store, Distributed database, Graph database, Logic
+  database
+
+* 관계형 데이터베이스 사용 예의 96% 대체 가능. 나머지 4%는 쓰기 작업이 많은(high
+  write-volume) 경우.
+
+* 응답 속도가 빠르다 (거의 memory DB 수준)
+** ex) 1.5 ms per query, compared to the 10-20 ms in SQL query
+
+* Storage backend로 다양한 DB를 사용할 수 있다.
+** DynamoDB(AWS), Cassandra, Riak, Couchbase, Infinispan, or SQL database등 
+
+
+== Datomic architecture
+
+* Reads are separated from writes and decentralized.
+
+* Writes don't block reads, reads don't block one another.
+
+* Read scaling horizontally by adding more "peer" systems.
+
+image::datomic-architecture.png[]
+
+[listing]
+.Datomic DB vs. SQL DB
+----
+   Datomic DB               SQL DB
+=============================================
+|-- Storage
+|
+|-- Transactor
+|   |-- Writing
+|   `-- Indexing          SQL Server
+|
+`-- Peer Library
+    |-- Live index
+    |-- Cache
+====|========================================
+    `-- Query             SQL Client Library
+=============================================
+----
+
+
+== Keyword data type in Clojure
+
+=== keyword data type 형식
+
+[listing]
+----
+:namespace-part/name-part
+
+:table-name/field-name
+----
+
+=== keyword examples
+
+[source]
+....
+:employee/address
+
+:address
+
+:user.type/superuser
+
+:user.type.v2/superuser
+
+:user.type/superuser.boss
+:user.type/superuser.manager
+....
+
+
+=== keyword data type의 평가(evaluation)
+
+* Keyowrd data type is a self-evaluated value.
+
+
+[listing]
+----
+:employee/address   ;=> :employee/address
+----
+
+
+== Datom
+
+* datom은 Datomic이 데이터를 처리할 때의 기본 단위이다.
+
+=== datom의 구성요소
+
+* 하나의 datom은 1 개의 field를 표현한다.
+* 하나의 datom은 5 개의 구성요소로 이루어져 있다.
++
+[listing]
+----
+[entity-id attribute value transaction-id added?]
+----
+
+=== datom의 구성요소 설명
+
+[width="75%",cols="1,3"]
+|===
+
+| `entity-id`
+a|
+* SQL DB의 record id (primary key 역할)에 해당.
+* 개발자가 지정해 줄 수 없으며, Datomic이 자동으로 생성. 동일 db 내에서 유일한 값.
+* Java의 long 타입 (64 비트 정수형)
+
+| `attribute` | SQL DB의 field name
+| `value`     | SQL DB의 field value
+| `transaction-id` | 동일한 transaction(쓰기)일 때, 동일한 `transaction-id` 값을 부여 받는다.
+| `added?` 
+a|
+* `true`: assert or accumulate
+* `false`: retract 
+
+|===
+
+[listing,subs="macros,quotes"]
+.datom들의 실례
+----
++[<e-id>   <attribute>         <value>     <tx-id>  <added?>]+
+...
+[   42    :person/firstName   "James"      102     true    ]
+[   42    :person/lastName    "Clark"      102     true    ]
+[   42    :person/address     #43#           102     true    ]
+
+[   #43#    :address/state      "Oregon"     102     true    ]
+[   #43#    :address/city       "Portland"   102     true    ]
+
+[ 1077    :person/fitstName   "Viola"      103     true    ]
+[ 1077    :person/lastName    "Davis"      103     true    ]
+[ 1077    :person/friends     #{42 89}     103     true    ]
+...
+----
+
+* (참고) `:db.type/ref` <<db-type-ref>>
+
+==== SQL table의 record: 2차원 배열
+
+[listing]
+----
+[   42    :person/firstName   "James"      102     true    ]
+[   42    :person/lastName    "Clark"      102     true    ]
+[   42    :person/gender      "male"       102     true    ]
+----
+
+==== NoSQL의 document: tree 구조 
+
+[listing]
+----
+...
+[   42    :person/firstName   "James"      102     true    ]
+[   42    :person/lastName    "Clark"      102     true    ]
+
+[   52    :person/firstName   "Alice"      102     true    ]
+[   52    :person/lastName    "Parker"     102     true    ]
+
+[ 1077    :person/fitstName   "Viola"      103     true    ]
+[ 1077    :person/lastName    "Davis"      103     true    ]
+[ 1077    :person/friends     #{42 52}     103     true    ]
+...
+----
+
+==== Graph DB도 구현 가능
+
+
+
+=== SQL CRUD와의 용어 비교
+
+* CRUD vs. ARAR
++
+[%header,width="75%",cols="3*^"]
+|===
+
+| SQL    | Datomic     | Datomic 담당 함수
+| Create | Assert      | `transact`
+| Read   | Read        | `q`
+| Update | Accumulate  | `transact`
+| Delete | Retract     | `transact`
+|===
+
+
+
+
+== Schema
+
+=== DB별 비교
+ 
+* SQL DB
+** schema를 table 단위로 작성한다.
+** record 구조가 고정되어 있다.
+
+* Datomic DB
+** schema를 field 단위로 작성한다.
+** record 구조가 고정되어 있지 않다.
++
+따라서 동적으로 field를 조합하여 record를 만들 수 있다.
+** schema 자체도 datom으로 이루어져 있다.
++
+따라서 프로그램 실행 중에 동적으로 schema 생성 및 변경이 가능하다.
+
+* NoSQL DB
+** schema가 아예 없다.
+
+=== Datomic Schema의 구성
+
+[source]
+.Datomic Schema의 예
+....
+(def schema
+  [{:db/ident :user/id
+    :db/valueType :db.type/string
+    :db/unique :db.unique/value
+    :db/cardinality :db.cardinality/one}
+
+   {:db/ident :user/name
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+
+   {:db/ident :user/e-mail
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}])
+....
+
+[%header,cols="1,3a"]
+|===
+
+| Schema Attributes   | Values
+|`:db/ident`   | field name을 지정한다. 반드시 keyword 자료형이어야 한다.
+
+|`:db/valueType` [[db-type-ref]]
+| field value의 자료형을 지정힌다.
+
+* `:db.type/string`
+* `:db.type/long :db.type/bigint`
+* `:db.type/float :db.type/double :db.type/bigdec`
+* `:db.type/boolean`
+* `:db.type/keyword`
+* `:db.type/ref` 
+* `:db.type/instant`
+* `:db.type/uuid`
+* `:db.type/url`
+* `:db.type/bytes`
+
+| `:db/cardinality`
+|
+* `:db.cardinality/one` - 일대일 대응
+* `:db.cardinality/many` - 일대다 대응
+
+| `:db/noHistory`
+| 
+* `true` - field value를 누적(accumulate)시키지 않고, 기존의 값을 덮어 쓴다(overwrite).
+* `false` - default
+
+| pass:q[......]
+| pass:q[......]
+
+|===
+
+=== Schema 예제
+
+[source]
+.datomic-guide/schema-example.clj
+....
+(ns datomic-guide.schema-example
+  (:require [datomic.api :as d]))
+
+;;; database 생성
+(def db-uri "datomic:mem://schema-example")
+
+(d/create-database db-uri)
+
+;;; conn 얻기
+(def conn (d/connect db-uri))
+
+;;;
+;;; schema definitions
+;;;
+(def schema-1
+  [{:db/ident :user/id
+    :db/valueType :db.type/string
+    :db/unique :db.unique/value
+    :db/cardinality :db.cardinality/one}
+
+   {:db/ident :user/name
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+
+   {:db/ident :user/e-mail
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}])
+
+;;; schema-1 install
+@(d/transact conn schema-1)
+
+
+;;;
+;;; data definitions
+;;;
+(def user-data
+  [{:db/id #db/id[:db.part/user]
+    :user/id "alice"
+    :user/name "Alice Parker"
+    :user/e-mail "alice@gmail.com"}
+
+   {:db/id #db/id[:db.part/user]
+    :user/id "jack"
+    :user/name "Jack Hinton"
+    :user/e-mail "jack@gmail.com"}])
+   
+;;; data install
+@(d/transact conn user-data)
+
+
+;;;
+;;; "alice" 관련 정보 확인 
+;;;
+(defn find-user [id]
+  (d/q '[:find ?e .
+         :in $ ?id
+         :where [?e :user/id ?id]]
+        (d/db conn) id))
+
+(def alice-ent-id (find-user "alice"))
+
+alice-ent-id ; => 17592186045418
+
+(d/pull (d/db conn) '[*] alice-ent-id)
+; => {:db/id 17592186045418,
+;     :user/id "alice",
+;     :user/name "Alice Parker",
+;     :user/e-mail "alice@gmail.com"}
+
+
+;;;
+;;; field name :user/alias 추가
+;;;
+(def schema-2
+  [{:db/ident :user/alias
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}])
+
+@(d/transact conn schema-2)
+
+
+;; "alice"의 :user/alias 필드값 추가
+@(d/transact conn [[:db/add alice-ent-id :user/alias "wonderland"]])
+
+;; 추가된 :user/alias 필드값 확인
+(d/pull (d/db conn) '[*] alice-ent-id)
+; => {:db/id 17592186045418,
+;     :user/id "alice",
+;     :user/name "Alice Parker",
+;     :user/e-mail "alice@gmail.com",
+;     :user/alias "wonderland"}
+
+
+;;;
+;;; field name :user/alias --> :user/nickname 으로 변경
+;;;
+(def alias-ent-id (d/entid (d/db conn) :user/alias))
+
+@(d/transact conn [[:db/add alias-ent-id :db/ident :user/nickname]])
+
+(d/pull (d/db conn) '[*] alice-end-id)
+; => {:db/id 17592186045418,
+;     :user/id "alice",
+;     :user/name "Alice Parker",
+;     :user/e-mail "alice@gmail.com",
+;     :user/nickname "wonderland"}
+....
+
+
+=== schema도 datom이다
+
+[listing,subs="macros,quotes"]
+----
++[<e-id>   <attribute>       <value>              <tx-id>   <added?>]+
+...
+[   #33#    :db/ident         #:user/alias#          102       true    ]
+[   #33#    :db/type          :db.type/string      102       true    ]
+[   #33#    :db/cardinality   :db.cardinality/one  102       true    ]
+
+[   42    :user/id          "alice"              95        true    ]
+[   42    :user/name        "Alice Parker"       95        true    ]
+[   42    :user/e-mail      "alice@gmail.com"    95        true    ]
+
+[   42    #:user/alias#       "wonderland"         205       true    ]
+          (실제값은 #33#)
+...
+----
+
+
+== Query
+
+=== Query language
+
+* Datomic은 datalog라는 query language를 사용한다. 즉, SQL query 문과 다르다.
+* Datalog = Data + Prolog(Logic programming)
+
+[%header,cols="1,2,2"]
+|===
+
+|             ^| SQL                   ^| Datomc
+| query        | SQL query (문자열 pass:q[-->] 조작이 쉽지 않다)     | Datalog query (Clojure 자료형  pass:q[-->] 조작이 쉽다) 
+| join 방식    | 명시적                 | 묵시적
+
+|===
+
+
+=== Query examples
+
+[source]
+.schema 요약
+....
+:movie/title       :db.type/string   :db.cardinality/one
+:movie/year        :db.type/long     :db.cardinality/one
+:movie/cast        :db.type/ref      :db.cardinality/many
+
+:person/name       :db.type/string   :db.cardinality/one
+:person/born       :db.type/instan   :db.cardinality/one
+....
+
+
+[source,subs="macros,quotes"]
+.query 예제
+....
+
+;; SQL query
+;;
+;; SELECT m.title
+;; FROM movies m
+;; WHERE m.year = 1987;
+ 
+(d/q '[:find ?title
+       :where [?e :movie/year 1987]
+              [?e :movie/title ?title]]
+     (d/db conn))
+; => +#+{["RoboCop"] ["Lethal Weapon"] ["Predator"]}
+
+
+;; query문에서 parameter의 사용
+(d/q '[:find ?title
+       :in #$ ?year#
+       :where [?e :movie/year ?year]
+              [?e :movie/title ?title]]
+     #(d/db conn) 1987#)
+; => +#+{["RoboCop"] ["Lethal Weapon"] ["Predator"]}
+
+
+;; query문에서 함수의 사용
+(d/q '[:find ?title ?year
+       :where [?m :movie/title ?title]
+              [?m :movie/year ?year]
+              [#(< ?year 1984)#]]
+     (d/db conn))
+; => +#+{["Alien" 1979] ["Mad Max" 1979] ["First Blood" 1982] ["Mad Max 2" 1981]}
+....
+
+ 
+=== Join example
+
+==== SQL explicit join
+
+[listing]
+----
+SELECT a.account_id, c.gender, e.fname, e.lname
+FROM account a INNER JOIN customer c
+       ON a.cust_id = c.cust_id
+     INNER JOIN employee e
+       ON a.emp_id = e.emp_id
+WHERE c.cust_type = 'B';
+----
+
+[listing,subs="macros,quotes"]
+----
+c (customer)
+|-- #cust_id#     (PK)  <--
+|-- cust_type           |
+`-- *gender*              |     
+                        |
+a (account)             |
+|-- *account_id*  (PK)    |
+|-- #cust_id#     (FK)  <--
+`-- #emp_id#      (FK)      <--
+                            |  
+e (employee)                |
+|-- #emp_id#      (PK)      <--
+|-- *fname*
+`-- *lname*
+----
+
+
+==== Datomic implicit join
+
+[source,subs="macros,quotes"]
+....
+(d/q '[:find ?account-id ?gender ?fname ?lname
+       :where [?cust-id     :cust/type        "B"]
+              [#?cust-id#     :cust/gender      *?gender*]
+              [*?account-id*  :account/cust-id  #?cust-id#]
+              [?account-id  :account/emp-id   #?emp-id#]
+              [#?emp-id#      :emp/fname        *?fname*]
+              [?emp-id      :emp/lname        *?lname*]])
+....
+
+==== query시 주의할 점
+
+* query문의 ``:where``절 순서가 중요하다.
+
+[source]
+.다음 두 개의 쿼리 중 어느 쪽이 더 효율적일까?
+....
+(d/q '[:find ?cust-id
+       :where [?cust-id :cust/gender "female"]
+              [?cust-id :cust/type   "B"]])
+
+(d/q '[:find ?cust-id
+       :where [?cust-id :cust/type   "B"]
+              [?cust-id :cust/gender "female"]])
+....
+
+
+[%header,width="75%",cols="2,^.^1"]
+|===
+
+^| 처리량  ^| 메모리 사용량
+
+| \[ \hbox{100만명의 고객} \times \frac{1}{2} \times \frac{1}{10} = \hbox{5만명의 고객} \]
+| 50만명 + 5만명 = 55만명
+
+| \[ \hbox{100만명의 고객} \times \frac{1}{10} \times \frac{1}{2} = \hbox{5만명의 고객} \] 
+| 10만명 + 5만명 = 15만명
+
+|===
+
+
+
+== DB as a Value & History
+
+=== Atom data type in Clojure
+
+[%header,cols="1a,1a"]
+|===
+
+^| Code ^| Diagram
+
+| [source]
+....
+(def a (atom 10))
+
+a   ;=> #atom[10 0x274b9960]
+@a  ; => 10
+
+(def b @a)
+
+b   ; => 10
+....
+
+| [listing]
+----
+ var          atom            value
+=============================================
+a -->  #atom[10 0x274b9960] --> 10 (100 번지)
+                                 ^
+                                 \|
+b --------------------------------
+----
+
+|
+[source]
+....
+(reset! a 20)
+
+@a   ; => 20
+b    ; => 10
+....
+
+| [listing]
+----
+ var          atom            value
+============================================
+a -->  #atom[20 0x274b9960] --> 20 (200 번지)
+
+b ----------------------------> 10 (100 번지)
+----
+
+|===
+
+=== DB as A Value
+
+[source]
+....
+(ns datomic-guide.time-travel
+  (:require [datomic.api :as d]))
+
+;;; db connection
+(def db-uri "datomic:mem://time-travel")
+(d/create-database db-uri)
+(def conn (d/connect db-uri))
+
+
+(def db-1(d/db conn))
+
+db-1   ; => datomic.db.Db@29475cf8
+
+
+;; schema install
+(def schema
+  [{:db/ident :user/id
+    :db/valueType :db.type/string
+    :db/unique :db.unique/value
+    :db/cardinality :db.cardinality/one}
+
+   {:db/ident :user/name
+    :db/valueType :db.type/string
+    :db/cardinality :db.cardinality/one}
+
+   {:db/ident :user/e-mail
+    :db/valueType :db.type/string
+    :db/unique :db.unique/identity
+    :db/cardinality :db.cardinality/one}])
+
+@(d/transact conn schema)
+; => {:db-before datomic.db.Db@29475cf8,
+;     :db-after datomic.db.Db@5ba75b5c,
+;     :tx-data [#datom[13194139534312 50 #inst "2017-11-09T06:03:29.648-00:00" 13194139534312 true]
+;               #datom[63 10 :user/id 13194139534312 true]
+;               #datom[63 40 23 13194139534312 true]
+;               #datom[63 42 37 13194139534312 true]
+;               #datom[63 41 35 13194139534312 true]
+;               #datom[64 10 :user/name 13194139534312 true]
+;               #datom[64 40 23 13194139534312 true]
+;               #datom[64 41 35 13194139534312 true]
+;               #datom[65 10 :user/e-mail 13194139534312 true]
+;               #datom[65 40 23 13194139534312 true]
+;               #datom[65 42 38 13194139534312 true]
+;               #datom[65 41 35 13194139534312 true]
+;               #datom[0 13 65 13194139534312 true]
+;               #datom[0 13 64 13194139534312 true]
+;               #datom[0 13 63 13194139534312 true]],
+;     :tempids {-9223301668109598143 63, -9223301668109598142 64, -9223301668109598141 65}}
+
+(def db-2 (d/db conn))
+
+db-2   ; => datomic.db.Db@5ba75b5c
+
+
+;; data install
+(def user-data
+  [{:db/id #db/id[:db.part/user]
+    :user/id "alice"
+    :user/name "Alice Parker"
+    :user/e-mail "alice@gmail.com"}
+
+   {:db/id #db/id[:db.part/user]
+    :user/id "jack"
+    :user/name "Jack Hinton"
+    :user/e-mail "jack@gmail.com"}])
+   
+@(d/transact conn user-data)
+
+(def db-3 (d/db conn))
+
+db-3   ; => datomic.db.Db@d34f836c
+
+
+(def alice-ent-id
+  (d/q '[:find ?e .
+         :where [?e :user/id "alice"]]
+       db-3))
+
+(d/pull db-3 '[*] alice-ent-id)
+; => {:db/id 17592186045418,
+;     :user/id "alice",
+;     :user/name "Alice Parker",
+;     :user/e-mail "alice@gmail.com"}
+
+
+
+@(d/transact conn [[:db/add alice-ent-id :user/e-mail "alice@facebook.com"]])
+
+(def db-4 (d/db conn))
+
+(d/pull db-4 '[*] alice-ent-id)
+; => {:db/id 17592186045418,
+;     :user/id "alice",
+;     :user/name "Alice Parker",
+;     :user/e-mail "alice@facebook.com"}
+....
+
+
+=== History DB
+
+[source]
+....
+(def hist-db (d/history db-4))
+
+(d/q '[:find ?e ?e-mail ?tx
+       :in $hist
+       :where [$hist ?e :user/id "alice"]
+              [$hist ?e :user/e-mail ?e-mail]]
+     hist-db)
+; => #{[17592186045418 "alice@gmail.com"]
+;      [17592186045418 "alice@facebook.com"]}
+....
+
+
+
+
+
+
+
+
+ 
+
+
+== 한계
+
+* not open-source, free-as-free-beer. 
+* memory 사용량이 많다.
+  
+
+== 참고 자료
+
+. link:http://www.learndatalogtoday.org[]
+** Datomic에서 사용하고 있는 Datalog 방식의 query를 간단히 소개
+
+. link:https://www.amazon.com/Professional-Clojure-Jeremy-Anderson/dp/1119267277/ref=sr_1_1?ie=UTF8&qid=1510200830&sr=8-1&keywords=professional+clojure[Professional Clojure], Chapter 6
+** 현재까지 나온 Clojure 관련 책들 중에서 Datomic에 대해 상대적으로 가장 자세하게 소개
+
+. link:http://docs.datomic.com/index.html[]
+** Datomic 공식 문서 site
++
+. link:https://github.com/Datomic/day-of-datomic[]
+** 다양하고 풍부한 예제 제공
+** 특히 link:https://github.com/Datomic/day-of-datomic/tree/master/tutorial[tutorial] 폴더에 Datomic이 제공하는 거의 모든 API에 대한 예제가 담겨 있다.
